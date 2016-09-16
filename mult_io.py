@@ -26,6 +26,7 @@ class MultIO(object):
         self._return_count = 0
         self._count = 0
         self._par_gtr = None
+        self._start()
 
     def __iter__(self):
         return self
@@ -69,9 +70,13 @@ class MultIO(object):
         """
         self._par_gtr = iter(par_gtr)
         self._close_flag = False
-        while not self._close_flag and self._par_queue.qsize() < self._queue_size:
+        self._count = 0
+        self._return_count = 0
+        count = 0
+        while not self._close_flag and count < self._queue_size:
             self._insert_next_par()
-        self._start()
+            count += 1
+
 
     def _insert_next_par(self):
         try:
@@ -116,17 +121,25 @@ if __name__ == "__main__":
     import os
     import cv2
 
+    test_folder = "../data/test_output/"
     file_list = os.listdir(Settings.train_folder)
     def read_image(folder, name):
         return cv2.imread(os.path.join(folder, name))
+    def dump_image(folder, par):
+        data, path = par
+        cv2.imwrite(os.path.join(folder, path), data)
     stream = MultIO(lambda x: read_image(Settings.train_folder, x), in_order=True)
     stream.open(file_list)
+    out_stream = MultIO(lambda x: dump_image(test_folder, x), max_thread=5, queue_size=100, in_order=False)
     start = time.time()
     count = 0
     for img in stream:
+        out_stream.dump(img, file_list[count])
         count += 1
     end = time.time()
     print end - start
+    out_stream.close()
+
 
     start = time.time()
     count = 0
