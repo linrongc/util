@@ -8,13 +8,14 @@ import time, Queue, threading, sys
 
 class MultIO(object):
 
-    def __init__(self, function, max_thread=5, queue_size=100, in_order=False):
+    def __init__(self, function, max_thread=5, queue_size=100, in_order=False, name=""):
         """
         :param function: target function
         :param max_thread: thread number
         :param queue_size: largest size of queue
         :param in_order: return the result in order or not
         """
+        self.name = name  # use for output
         self._max_thread = max_thread
         self._function = function
         self._thread_pool = [threading.Thread(target=self._work) for i in range(max_thread)]
@@ -31,13 +32,12 @@ class MultIO(object):
     def __iter__(self):
         return self
 
-    def _put_result_into_queue(self, result):
-        self._return_queue.put(result)
+    def _increase_return_count(self):
         self._return_lock.acquire()
         try:
             self._return_count += 1
             if self._return_count % 100 == 0:
-                print "reading item: ", self._return_count
+                print self.name + " complete item: ", self._return_count
                 sys.stdout.flush()
         finally:
             self._return_lock.release()
@@ -45,24 +45,14 @@ class MultIO(object):
     def _work(self):
         while not self._close_flag or not self._par_queue.empty():
             try:
-                if self._in_order:
-                    count, par = self._par_queue.get(block=False)
-                    result = self._function(par)
-                    if result:
+                count, par = self._par_queue.get(block=False)
+                result = self._function(par)
+                if result is not None:
+                    if self._in_order:
                         while self._return_count != count:
                             time.sleep(1e-4)
-                        self._put_result_into_queue(result)
-                    else:  # avoid other threads to wait forever
-                        self._return_lock.acquire()
-                        try:
-                            self._return_count += 1
-                        finally:
-                            self._return_lock.release()
-                else:
-                    par = self._par_queue.get(block=False)
-                    result = self._function(par)
-                    if result:
-                        self._put_result_into_queue(result)
+                    self._return_queue.put(result)
+                self._increase_return_count()
             except Queue.Empty:
                 time.sleep(0.001)
 
@@ -75,15 +65,12 @@ class MultIO(object):
         """
         while self._par_queue.qsize() > self._queue_size:
             time.sleep(0.001)
-        if self._in_order:
-            self._put_par_into_queue([self._par_count, [data, path]])
-        else:
-            self._par_queue.put([data, path])
+        self._par_queue.put([self._par_count, [data, path]])
+        self._increase_par_count()
 
-    def _put_par_into_queue(self, par):
+    def _increase_par_count(self):
         self._par_lock.acquire()
         try:
-            self._par_queue.put(par)
             self._par_count += 1
         finally:
             self._par_lock.release()
@@ -122,10 +109,8 @@ class MultIO(object):
         except StopIteration:
             self._close_flag = True
             return
-        if self._in_order:
-            self._put_par_into_queue([self._par_count, par])
-        else:
-            self._par_queue.put(par)  # Queue.Queue is thread safe
+        self._par_queue.put([self._par_count, par])
+        self._increase_par_count()
 
     def _start(self):
         for thread in self._thread_pool:
@@ -166,9 +151,9 @@ if __name__ == "__main__":
     def dump_image(folder, par):
         data, path = par
         cv2.imwrite(os.path.join(folder, path), data)
-    stream = MultIO(lambda x: read_image(Settings.train_folder, x), in_order=True)
+    stream = MultIO(lambda x: read_image(Settings.train_folder, x), in_order=False, name="input stream")
     stream.open(file_list)
-    out_stream = MultIO(lambda x: dump_image(test_folder, x), max_thread=5, queue_size=100, in_order=False)
+    out_stream = MultIO(lambda x: dump_image(test_folder, x), max_thread=5, queue_size=100, in_order=False, name="output stream")
     start = time.time()
     count = 0
     for img in stream:
@@ -177,12 +162,11 @@ if __name__ == "__main__":
     end = time.time()
     print end - start
     out_stream.close()
-
-
     start = time.time()
     count = 0
     for name in file_list:
-        read_image(Settings.train_folder, name)
+        image = read_image(Settings.train_folder, name)
+        dump_image(test_folder, [image, name])
         count += 1
     end = time.time()
     print end - start
