@@ -23,15 +23,14 @@ class MultIO(object):
         self._close_flag = False
         self._return_queue = Queue.Queue()
         self._in_order = in_order
-        self._return_count = 0
-        self._return_lock = threading.Lock()
-        self._count = 0
+        self._return_count, self._par_count = 0, 0
+        self._return_lock, self._par_lock = threading.Lock(), threading.Lock()
         self._par_gtr = None
         self._start()
 
     def __iter__(self):
         return self
-    
+
     def _put_result_into_queue(self, result):
         self._return_queue.put(result)
         self._return_lock.acquire()
@@ -42,7 +41,7 @@ class MultIO(object):
                 sys.stdout.flush()
         finally:
             self._return_lock.release()
-    
+
     def _work(self):
         while not self._close_flag or not self._par_queue.empty():
             try:
@@ -71,11 +70,18 @@ class MultIO(object):
         while self._par_queue.qsize() > self._queue_size:
             time.sleep(0.001)
         if self._in_order:
-            self._par_queue.put([self._count, [data, path]])
-            self._count += 1
+            self._put_par_into_queue([self._par_count, [data, path]])
         else:
             self._par_queue.put([data, path])
-
+    
+    def _put_par_into_queue(self, par):
+        self._par_lock.acquire()
+        try:
+            self._par_queue.put(par)
+            self._par_count += 1
+        finally:
+            self._par_lock.release()
+    
     def _refresh(self):
         dead = 0
         for thread in self._thread_pool:
@@ -96,7 +102,7 @@ class MultIO(object):
         """
         self._par_gtr = iter(par_gtr)
         self._close_flag = False
-        self._count = 0
+        self._par_count = 0
         self._return_count = 0
         count = 0
         self._refresh()
@@ -111,10 +117,9 @@ class MultIO(object):
             self._close_flag = True
             return
         if self._in_order:
-            self._par_queue.put([self._count, par])
-            self._count += 1
+            self._put_par_into_queue([self._par_count, par])
         else:
-            self._par_queue.put(par)
+            self._par_queue.put(par)  # Queue.Queue is thread safe
 
     def _start(self):
         for thread in self._thread_pool:
@@ -175,3 +180,5 @@ if __name__ == "__main__":
         count += 1
     end = time.time()
     print end - start
+
+
