@@ -52,6 +52,12 @@ class MultIO(object):
                         while self._return_count != count:
                             time.sleep(1e-4)
                         self._put_result_into_queue(result)
+                    else:  # avoid other threads to wait forever
+                        self._return_lock.acquire()
+                        try:
+                            self._return_count += 1
+                        finally:
+                            self._return_lock.release()
                 else:
                     par = self._par_queue.get(block=False)
                     result = self._function(par)
@@ -73,7 +79,7 @@ class MultIO(object):
             self._put_par_into_queue([self._par_count, [data, path]])
         else:
             self._par_queue.put([data, path])
-    
+
     def _put_par_into_queue(self, par):
         self._par_lock.acquire()
         try:
@@ -81,7 +87,7 @@ class MultIO(object):
             self._par_count += 1
         finally:
             self._par_lock.release()
-    
+
     def _refresh(self):
         dead = 0
         for thread in self._thread_pool:
