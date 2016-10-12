@@ -4,7 +4,7 @@
 @time = 9/15/2016 10:44 AM
 @author = Rongcheng
 """
-import time, Queue, threading
+import time, Queue, threading, sys
 
 class MultIO(object):
 
@@ -15,7 +15,7 @@ class MultIO(object):
         :param queue_size: largest size of queue
         :param in_order: return the result in order or not
         """
-
+        self._max_thread = max_thread
         self._function = function
         self._thread_pool = [threading.Thread(target=self._work) for i in range(max_thread)]
         self._par_queue = Queue.Queue()
@@ -24,27 +24,40 @@ class MultIO(object):
         self._return_queue = Queue.Queue()
         self._in_order = in_order
         self._return_count = 0
+        self._return_lock = threading.Lock()
         self._count = 0
         self._par_gtr = None
         self._start()
 
     def __iter__(self):
         return self
-
+    
+    def _put_result_into_queue(self, result):
+        self._return_queue.put(result)
+        self._return_lock.acquire()
+        try:
+            self._return_count += 1
+            if self._return_count % 100 == 0:
+                print "reading item: ", self._return_count
+                sys.stdout.flush()
+        finally:
+            self._return_lock.release()
+    
     def _work(self):
         while not self._close_flag or not self._par_queue.empty():
             try:
                 if self._in_order:
                     count, par = self._par_queue.get(block=False)
                     result = self._function(par)
-                    while self._return_count != count:
-                        time.sleep(1e-4)
-                    self._return_queue.put(result)
-                    self._return_count += 1
+                    if result:
+                        while self._return_count != count:
+                            time.sleep(1e-4)
+                        self._put_result_into_queue(result)
                 else:
                     par = self._par_queue.get(block=False)
                     result = self._function(par)
-                    self._return_queue.put(result)
+                    if result:
+                        self._put_result_into_queue(result)
             except Queue.Empty:
                 time.sleep(0.001)
 
@@ -63,6 +76,19 @@ class MultIO(object):
         else:
             self._par_queue.put([data, path])
 
+    def _refresh(self):
+        dead = 0
+        for thread in self._thread_pool:
+            if not thread.isAlive():
+                dead += 1
+        if dead == 0:
+            return
+        elif dead == self._max_thread:
+            self._thread_pool = [threading.Thread(target=self._work) for i in range(self._max_thread)]
+            self._start()
+        else:
+            raise Exception("previous threads not complete!")
+
     def open(self, par_gtr):
         """
         :param par_gtr: iterable object
@@ -73,10 +99,10 @@ class MultIO(object):
         self._count = 0
         self._return_count = 0
         count = 0
+        self._refresh()
         while not self._close_flag and count < self._queue_size:
             self._insert_next_par()
             count += 1
-
 
     def _insert_next_par(self):
         try:
@@ -96,11 +122,12 @@ class MultIO(object):
 
     def close(self):
         """
-        close the threads, to use when no further dump jobs
+        close the threads, to use when no further dump jobs or stop reading jobs
         """
         self._close_flag = True
         for thread in self._thread_pool:
             thread.join()
+        self._par_queue.queue.clear()
 
     def next(self):
         self._insert_next_par()
@@ -148,5 +175,3 @@ if __name__ == "__main__":
         count += 1
     end = time.time()
     print end - start
-
-
