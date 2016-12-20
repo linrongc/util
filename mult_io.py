@@ -1,10 +1,14 @@
 #! /usr/bin/env python
-# -*- coding: utf-8 -*- 
+# -*- coding: utf-8 -*-
 """
 @time = 9/15/2016 10:44 AM
 @author = Rongcheng
 """
-import time, Queue, threading, sys
+import Queue
+import sys
+import threading
+import time
+
 
 class MultIO(object):
 
@@ -18,7 +22,7 @@ class MultIO(object):
         self.name = name  # use for output
         self._max_thread = max_thread
         self._function = function
-        self._thread_pool = [threading.Thread(target=self._work) for _ in range(max_thread)]
+        self._thread_pool = [threading.Thread(target=self._work) for i in range(max_thread)]
         self._par_queue = Queue.Queue()
         self._queue_size = queue_size
         self._close_flag = False
@@ -36,9 +40,11 @@ class MultIO(object):
         self._return_lock.acquire()
         try:
             self._return_count += 1
-            if self._return_count % 100 == 0:
+            if self._return_count % 1000 == 0:
                 print self.name + " complete item: ", self._return_count
                 sys.stdout.flush()
+        except:
+            raise RuntimeError("Synchronization error!")
         finally:
             self._return_lock.release()
 
@@ -54,7 +60,7 @@ class MultIO(object):
                     self._return_queue.put(result)
                 self._increase_return_count()
             except Queue.Empty:
-                time.sleep(0.001)
+                time.sleep(0.0001)
 
     def dump(self, data, path):
         """
@@ -65,13 +71,15 @@ class MultIO(object):
         """
         while self._par_queue.qsize() > self._queue_size:
             time.sleep(0.001)
-        self._par_queue.put([self._par_count, [data, path]])
-        self._increase_par_count()
+        self._put_par_and_increase([data, path])
 
-    def _increase_par_count(self):
+    def _put_par_and_increase(self, par):
         self._par_lock.acquire()
         try:
+            self._par_queue.put([self._par_count, par])
             self._par_count += 1
+        except:
+            raise RuntimeError("Synchronization error!")
         finally:
             self._par_lock.release()
 
@@ -109,8 +117,7 @@ class MultIO(object):
         except StopIteration:
             self._close_flag = True
             return
-        self._par_queue.put([self._par_count, par])
-        self._increase_par_count()
+        self._put_par_and_increase(par)
 
     def _start(self):
         for thread in self._thread_pool:
@@ -142,16 +149,19 @@ class MultIO(object):
 if __name__ == "__main__":
     from settings import Settings
     import os
-    import cv2
+    import skimage.io
 
     test_folder = "../data/test_output/"
-    file_list = os.listdir(Settings.train_folder)
+    file_list = os.listdir(Settings.test_folder)
+
     def read_image(folder, name):
-        return cv2.imread(os.path.join(folder, name))
+        return skimage.io.imread(os.path.join(folder, name))
+
     def dump_image(folder, par):
         data, path = par
-        cv2.imwrite(os.path.join(folder, path), data)
-    stream = MultIO(lambda x: read_image(Settings.train_folder, x), in_order=False, name="input stream")
+        skimage.io.imsave(os.path.join(folder, path), data)
+
+    stream = MultIO(lambda x: read_image(Settings.test_folder, x), in_order=False, name="input stream")
     stream.open(file_list)
     out_stream = MultIO(lambda x: dump_image(test_folder, x), max_thread=5, queue_size=100, in_order=False, name="output stream")
     start = time.time()
@@ -165,7 +175,7 @@ if __name__ == "__main__":
     start = time.time()
     count = 0
     for name in file_list:
-        image = read_image(Settings.train_folder, name)
+        image = read_image(Settings.test_folder, name)
         dump_image(test_folder, [image, name])
         count += 1
     end = time.time()
