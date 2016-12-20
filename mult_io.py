@@ -18,7 +18,7 @@ class MultIO(object):
         self.name = name  # use for output
         self._max_thread = max_thread
         self._function = function
-        self._thread_pool = [threading.Thread(target=self._work) for i in range(max_thread)]
+        self._thread_pool = [threading.Thread(target=self._work) for _ in range(max_thread)]
         self._par_queue = Queue.Queue()
         self._queue_size = queue_size
         self._close_flag = False
